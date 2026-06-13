@@ -4,3 +4,9 @@ export {
   type SpikeInput,
   type SpikeResult,
 } from "./spike.service";
+export {
+  extractBrandFromUrl,
+  brandExtractionSchema,
+  type BrandExtraction,
+} from "./brand";
+export { uploadObject, type UploadResult } from "./storage";

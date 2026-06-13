@@ -4,3 +4,4 @@ export type {
   ApiResponse,
   ApiSuccessResponse,
 } from "./api";
+export type { Brand, BrandExtraction, BrandFormValues } from "./brand";
