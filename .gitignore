@@ -1,0 +1,6 @@
+.DS_Store
+*.log
+
+# Environment files (each app keeps its own)
+.env
+.env.local
