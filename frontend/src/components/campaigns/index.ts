@@ -6,3 +6,7 @@ export {
 export { CampaignProgress, type CampaignProgressProps } from "./CampaignProgress";
 export { CampaignVariants, type CampaignVariantsProps } from "./CampaignVariants";
 export { CampaignsList, type CampaignsListProps } from "./CampaignsList";
+export {
+  FreeTierCapNotice,
+  type FreeTierCapNoticeProps,
+} from "./FreeTierCapNotice";

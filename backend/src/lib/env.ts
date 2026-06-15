@@ -26,6 +26,16 @@ const envSchema = z.object({
   // Polar billing
   POLAR_ACCESS_TOKEN: z.string().min(1),
   POLAR_WEBHOOK_SECRET: z.string().min(1),
+  // Which Polar environment the access token belongs to.
+  POLAR_SERVER: z.enum(["sandbox", "production"]).default("sandbox"),
+  // Polar product ids per billing pack (optional until billing is configured).
+  POLAR_PRODUCT_CREDITS_S: z.string().optional(),
+  POLAR_PRODUCT_CREDITS_M: z.string().optional(),
+  POLAR_PRODUCT_CREDITS_L: z.string().optional(),
+  POLAR_PRODUCT_PRO: z.string().optional(),
+
+  // Public base URL of the frontend, used for checkout success/cancel redirects.
+  APP_URL: z.string().url().default("http://localhost:3000"),
 
   // Shared secret required to enqueue generation jobs from the frontend.
   // Optional in development; set it in production to lock down /jobs/generate.

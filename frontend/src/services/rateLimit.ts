@@ -1,20 +1,36 @@
 import { createServerClient } from "@/lib/supabase/server";
 
-/** Max campaigns any user may start within the rolling window. */
-const RATE_LIMIT_MAX = 3;
+/** Max campaigns any user may start within the rolling burst window. */
+export const RATE_LIMIT_MAX = 3;
 const RATE_LIMIT_WINDOW_MS = 60_000;
 
 /** Hard cap on campaigns a free-tier user may start per rolling 24h. */
-const FREE_TIER_DAILY_CAP = 10;
+export const FREE_TIER_DAILY_CAP = 10;
 const DAY_MS = 24 * 60 * 60 * 1000;
+
+export type UserPlan = "free" | "pro";
 
 export interface RateLimitResult {
   allowed: boolean;
   reason?: string;
 }
 
+export interface UsageStatus {
+  plan: UserPlan;
+  /** Campaigns started in the last 24h. */
+  dailyUsed: number;
+  /** Daily cap for the plan; null means unlimited (paid plans). */
+  dailyCap: number | null;
+  /** Remaining campaigns today; null when unlimited. */
+  remaining: number | null;
+  /** True when a free-tier user has hit their daily cap. */
+  capReached: boolean;
+}
+
+type ServerClient = Awaited<ReturnType<typeof createServerClient>>;
+
 async function countCampaignsSince(
-  supabase: Awaited<ReturnType<typeof createServerClient>>,
+  supabase: ServerClient,
   userId: string,
   since: Date,
 ): Promise<number> {
@@ -29,6 +45,53 @@ async function countCampaignsSince(
   }
 
   return count ?? 0;
+}
+
+async function getUserPlan(
+  supabase: ServerClient,
+  userId: string,
+): Promise<UserPlan> {
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("plan")
+    .eq("id", userId)
+    .maybeSingle();
+
+  return profile?.plan === "pro" ? "pro" : "free";
+}
+
+/**
+ * Returns the user's plan and free-tier usage against the daily cap. Shared by
+ * the rate limiter and the billing page so cap messaging stays consistent.
+ * Server-only.
+ */
+export async function getUsageStatus(userId: string): Promise<UsageStatus> {
+  const supabase = await createServerClient();
+  const plan = await getUserPlan(supabase, userId);
+
+  if (plan !== "free") {
+    return {
+      plan,
+      dailyUsed: 0,
+      dailyCap: null,
+      remaining: null,
+      capReached: false,
+    };
+  }
+
+  const dailyUsed = await countCampaignsSince(
+    supabase,
+    userId,
+    new Date(Date.now() - DAY_MS),
+  );
+
+  return {
+    plan,
+    dailyUsed,
+    dailyCap: FREE_TIER_DAILY_CAP,
+    remaining: Math.max(0, FREE_TIER_DAILY_CAP - dailyUsed),
+    capReached: dailyUsed >= FREE_TIER_DAILY_CAP,
+  };
 }
 
 /**
@@ -52,13 +115,7 @@ export async function checkGenerationRateLimit(
     };
   }
 
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("plan")
-    .eq("id", userId)
-    .maybeSingle();
-
-  const plan = profile?.plan ?? "free";
+  const plan = await getUserPlan(supabase, userId);
   if (plan === "free") {
     const daily = await countCampaignsSince(
       supabase,

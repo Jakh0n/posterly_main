@@ -1,5 +1,6 @@
 import { Router } from "express";
 
+import { billingRouter } from "./billing.route";
 import { brandRouter } from "./brand.route";
 import { campaignsRouter } from "./campaigns.route";
 import { healthRouter } from "./health.route";
@@ -13,5 +14,6 @@ router.use("/spike", spikeRouter);
 router.use("/brand", brandRouter);
 router.use("/campaigns", campaignsRouter);
 router.use("/jobs", jobsRouter);
+router.use("/billing", billingRouter);
 
 export { router as apiRouter };

@@ -8,4 +8,11 @@ export {
   getCampaignWithCreatives,
   listCampaigns,
 } from "./campaigns";
-export { checkGenerationRateLimit, type RateLimitResult } from "./rateLimit";
+export {
+  checkGenerationRateLimit,
+  getUsageStatus,
+  FREE_TIER_DAILY_CAP,
+  type RateLimitResult,
+  type UsageStatus,
+  type UserPlan,
+} from "./rateLimit";

@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import { getOpenAI } from "../../lib/openai";
 import { HttpError } from "../../lib/httpError";
+import { logger } from "../../utils/logger";
 
 export const briefSchema = z.object({
   scene: z.string().min(1),
@@ -44,9 +45,15 @@ const STYLE_DIRECTIVES: Record<BriefStyle, string> = {
 
 const BRIEF_STYLES: readonly BriefStyle[] = ["studio", "lifestyle", "flat-lay"];
 
-const SYSTEM_PROMPT = `You are a senior advertising art director. Given a product photo and basic copy, design a single hero advertising shot for THAT specific product.
+const MAX_VISION_ATTEMPTS = 2;
 
-Return STRICT JSON only (no markdown, no prose, no comments) with EXACTLY these keys:
+const SYSTEM_PROMPT = `You are a commercial product-photography art director. Your only job is to write a short creative brief describing a tasteful background/scene concept for a generic consumer product advertisement. This is a routine, benign commercial design task.
+
+When a reference image is provided, use it only to gauge the product's general category, colors and shape so the scene complements it. Do not identify people, brands or logos, and do not describe anyone in the image — focus solely on the product and an appropriate advertising backdrop. If the image is unclear, simply infer a plausible generic product from the text and proceed.
+
+Always comply and ALWAYS return valid JSON. Never refuse, never apologize, never return prose.
+
+Return STRICT JSON only (no markdown, no comments) with EXACTLY these keys:
 {
   "scene": string,            // concrete physical setting/background for the product
   "lighting": string,         // lighting setup and direction
@@ -58,85 +65,149 @@ Return STRICT JSON only (no markdown, no prose, no comments) with EXACTLY these 
 }
 
 Rules:
-- The scene must plausibly contain and flatter the real product in the photo.
-- composition MUST leave a large clean area (e.g. top third) free for text overlay.
+- composition MUST leave a large clean area (e.g. the top third) free for headline text.
 - negative_prompt MUST always include: text, words, letters, typography, logos, watermarks, signatures, captions.
 - Output JSON only.`;
 
 /**
- * Generates a structured creative brief for the product using GPT-4o vision.
- * Returns strictly-typed JSON validated against `briefSchema`. When a `style`
- * is provided it constrains the one controlled axis (studio/lifestyle/flat-lay).
+ * Typed error for a model refusal, empty body, or schema/parse miss — i.e. a
+ * "soft" failure that is worth retrying or falling back from (vs. a hard
+ * network/API error).
+ */
+class BriefRefusalError extends Error {}
+
+function buildUserText(input: BriefInput, style?: BriefStyle): string {
+  const styleLine = style ? `\n\n${STYLE_DIRECTIVES[style]}` : "";
+  return `Product name: ${input.productName}\nPrice: ${input.price}\nPromo: ${input.promo}${styleLine}\n\nDesign the advertising brief for this product. JSON only.`;
+}
+
+/**
+ * Performs a single brief request. When `includeImage` is true the product
+ * photo is attached (vision); otherwise it is a text-only request that almost
+ * never trips the vision safety filter. Throws `BriefRefusalError` on a soft
+ * failure so the caller can retry or fall back.
+ */
+async function requestBrief(
+  input: BriefInput,
+  style: BriefStyle | undefined,
+  includeImage: boolean,
+): Promise<Brief> {
+  const openai = getOpenAI();
+  const text = buildUserText(input, style);
+
+  const completion = await openai.chat.completions.create({
+    model: "gpt-4o",
+    temperature: 0.7,
+    response_format: { type: "json_object" },
+    messages: [
+      { role: "system", content: SYSTEM_PROMPT },
+      {
+        role: "user",
+        content: includeImage
+          ? [
+              { type: "text", text },
+              { type: "image_url", image_url: { url: input.productImageUrl } },
+            ]
+          : text,
+      },
+    ],
+  });
+
+  const message = completion.choices[0]?.message;
+  const raw = message?.content;
+  if (!raw) {
+    throw new BriefRefusalError(message?.refusal ?? "empty brief");
+  }
+
+  let json: unknown;
+  try {
+    json = JSON.parse(raw);
+  } catch {
+    throw new BriefRefusalError("brief was not valid JSON");
+  }
+
+  const parsed = briefSchema.safeParse(json);
+  if (!parsed.success) {
+    throw new BriefRefusalError("brief did not match the required schema");
+  }
+
+  return parsed.data;
+}
+
+/**
+ * Generates a structured creative brief for the product. Vision (with the
+ * product photo) is attempted up to `MAX_VISION_ATTEMPTS` times — GPT-4o vision
+ * refusals are non-deterministic, so a retry usually succeeds. If vision keeps
+ * refusing, it degrades to a text-only brief (no image), which almost never
+ * trips the safety filter. Returns strictly-typed JSON validated by `briefSchema`.
  */
 export async function generateBrief(
   input: BriefInput,
   style?: BriefStyle,
 ): Promise<Brief> {
+  for (let attempt = 1; attempt <= MAX_VISION_ATTEMPTS; attempt += 1) {
+    try {
+      return await requestBrief(input, style, true);
+    } catch (err) {
+      if (err instanceof BriefRefusalError) {
+        logger.warn("Brief vision attempt refused; retrying", {
+          style,
+          attempt,
+          reason: err.message,
+        });
+        continue;
+      }
+      // Hard error (network/API). Try the text-only path before giving up.
+      logger.warn("Brief vision attempt errored; falling back to text-only", {
+        style,
+        attempt,
+        reason: err instanceof Error ? err.message : "unknown",
+      });
+      break;
+    }
+  }
+
   try {
-    const openai = getOpenAI();
-
-    const styleLine = style ? `\n\n${STYLE_DIRECTIVES[style]}` : "";
-
-    const completion = await openai.chat.completions.create({
-      model: "gpt-4o",
-      temperature: 0.7,
-      response_format: { type: "json_object" },
-      messages: [
-        { role: "system", content: SYSTEM_PROMPT },
-        {
-          role: "user",
-          content: [
-            {
-              type: "text",
-              text: `Product name: ${input.productName}\nPrice: ${input.price}\nPromo: ${input.promo}${styleLine}\n\nDesign the advertising brief for this exact product. JSON only.`,
-            },
-            {
-              type: "image_url",
-              image_url: { url: input.productImageUrl },
-            },
-          ],
-        },
-      ],
-    });
-
-    const message = completion.choices[0]?.message;
-    const raw = message?.content;
-    if (!raw) {
-      throw HttpError.badRequest(
-        message?.refusal
-          ? `This photo was declined by the art director: ${message.refusal}`
-          : "GPT-4o returned an empty brief. Try a clearer product photo.",
-      );
-    }
-
-    const parsed = briefSchema.safeParse(JSON.parse(raw));
-    if (!parsed.success) {
-      throw HttpError.internal("GPT-4o brief did not match the required schema");
-    }
-
-    return parsed.data;
+    logger.info("Generating text-only brief fallback", { style });
+    return await requestBrief(input, style, false);
   } catch (err) {
-    if (err instanceof HttpError) {
-      throw err;
-    }
     const message = err instanceof Error ? err.message : "Unknown brief error";
     throw HttpError.internal(`Failed to generate brief: ${message}`);
   }
 }
 
 /**
- * Produces 3 briefs for the same product, each varying ONLY the style axis
- * (studio / lifestyle / flat-lay). Runs in parallel; fails if any variant fails.
+ * Produces briefs for the same product, each varying ONLY the style axis
+ * (studio / lifestyle / flat-lay). Runs in parallel and is resilient: a single
+ * failing style is logged and skipped rather than failing the whole campaign.
+ * Throws only if EVERY style fails (so the campaign can fail + refund).
  */
 export async function generateStyledBriefs(
   input: BriefInput,
 ): Promise<StyledBrief[]> {
-  const briefs = await Promise.all(
+  const results = await Promise.allSettled(
     BRIEF_STYLES.map(async (style) => ({
       style,
       brief: await generateBrief(input, style),
     })),
   );
+
+  const briefs: StyledBrief[] = [];
+  for (const result of results) {
+    if (result.status === "fulfilled") {
+      briefs.push(result.value);
+    } else {
+      const reason =
+        result.reason instanceof Error
+          ? result.reason.message
+          : "unknown error";
+      logger.error("Brief generation failed for a style", { reason });
+    }
+  }
+
+  if (briefs.length === 0) {
+    throw HttpError.internal("All creative briefs failed to generate");
+  }
 
   return briefs;
 }
