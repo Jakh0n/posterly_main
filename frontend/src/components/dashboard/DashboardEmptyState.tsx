@@ -15,7 +15,7 @@ export function DashboardEmptyState() {
         Create your first AI poster from a product photo. It only takes a few
         seconds.
       </p>
-      <Link href="/spike" className={cn(buttonVariants(), "mt-6")}>
+      <Link href="/campaigns/new" className={cn(buttonVariants(), "mt-6")}>
         Create your first poster
       </Link>
     </div>

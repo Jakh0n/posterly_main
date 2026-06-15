@@ -26,6 +26,17 @@ const envSchema = z.object({
   // Polar billing
   POLAR_ACCESS_TOKEN: z.string().min(1),
   POLAR_WEBHOOK_SECRET: z.string().min(1),
+
+  // Shared secret required to enqueue generation jobs from the frontend.
+  // Optional in development; set it in production to lock down /jobs/generate.
+  WORKER_SECRET: z.string().optional(),
+
+  // When true (or when FAL_KEY is a placeholder), the image step renders a
+  // local product-preserving placeholder instead of calling fal. Dev/test only.
+  MOCK_GENERATION: z
+    .enum(["true", "false"])
+    .optional()
+    .transform((value) => value === "true"),
 });
 
 export type Env = z.infer<typeof envSchema>;

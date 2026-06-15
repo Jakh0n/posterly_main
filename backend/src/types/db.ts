@@ -89,6 +89,7 @@ export interface Database {
           promo: string | null;
           product_image_url: string | null;
           status: CampaignStatus;
+          error: string | null;
           created_at: string;
         };
         Insert: {
@@ -100,6 +101,7 @@ export interface Database {
           promo?: string | null;
           product_image_url?: string | null;
           status?: CampaignStatus;
+          error?: string | null;
           created_at?: string;
         };
         Update: {
@@ -111,6 +113,7 @@ export interface Database {
           promo?: string | null;
           product_image_url?: string | null;
           status?: CampaignStatus;
+          error?: string | null;
           created_at?: string;
         };
         Relationships: [];
@@ -212,6 +215,13 @@ export interface Database {
           p_amount: number;
           p_reason: string;
           p_ref_id?: string | null;
+        };
+        Returns: number;
+      };
+      refund_credits: {
+        Args: {
+          p_user_id: string;
+          p_ref_id: string;
         };
         Returns: number;
       };

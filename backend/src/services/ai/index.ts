@@ -1,4 +1,12 @@
-export { generateBrief, briefSchema, type Brief, type BriefInput } from "./brief";
+export {
+  generateBrief,
+  generateStyledBriefs,
+  briefSchema,
+  type Brief,
+  type BriefInput,
+  type BriefStyle,
+  type StyledBrief,
+} from "./brief";
 export {
   generateProductImage,
   uploadProductImage,

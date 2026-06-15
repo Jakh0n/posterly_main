@@ -11,6 +11,14 @@ export interface OverlayInput {
   promo: string;
 }
 
+export interface RenderOverlayInput {
+  baseImage: Buffer;
+  productName: string;
+  price: string;
+  promo: string;
+  logoUrl?: string | null;
+}
+
 interface FontSet {
   regular: ArrayBuffer;
   bold: ArrayBuffer;
@@ -51,7 +59,13 @@ function loadFonts(): Promise<FontSet> {
   return fontCache;
 }
 
-function buildMarkup(input: OverlayInput, width: number): SatoriNode {
+interface OverlayText {
+  productName: string;
+  price: string;
+  promo: string;
+}
+
+function buildMarkup(input: OverlayText, width: number): SatoriNode {
   const scale = width / 1000;
 
   return {
@@ -125,19 +139,42 @@ function buildMarkup(input: OverlayInput, width: number): SatoriNode {
 }
 
 /**
- * Composites the product name, price and promo over the generated ad image.
- * Pipeline: satori (SVG) -> resvg (PNG) -> sharp (composite). No node-canvas.
- * Returns a base64 PNG data URL.
+ * Builds a logo composite (top-right) from a logo URL. Returns null and never
+ * throws when the logo can't be fetched — a missing logo must not fail a render.
  */
-export async function composeOverlay(input: OverlayInput): Promise<string> {
+async function buildLogoComposite(
+  logoUrl: string,
+  canvasWidth: number,
+): Promise<sharp.OverlayOptions | null> {
   try {
-    const res = await fetch(input.imageUrl);
+    const res = await fetch(logoUrl);
     if (!res.ok) {
-      throw HttpError.internal(`Failed to fetch base image (${res.status})`);
+      return null;
     }
-    const baseBuffer = Buffer.from(await res.arrayBuffer());
 
-    const metadata = await sharp(baseBuffer).metadata();
+    const logoBuffer = Buffer.from(await res.arrayBuffer());
+    const targetWidth = Math.round(canvasWidth * 0.14);
+    const margin = Math.round(canvasWidth * 0.05);
+
+    const resized = await sharp(logoBuffer)
+      .resize({ width: targetWidth, withoutEnlargement: true })
+      .png()
+      .toBuffer();
+
+    return { input: resized, top: margin, left: canvasWidth - targetWidth - margin };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Renders the name/price/promo (and optional logo) over a base image buffer.
+ * Pipeline: satori (SVG) -> resvg (PNG) -> sharp (composite). No node-canvas.
+ * Returns a PNG buffer ready to persist.
+ */
+export async function renderOverlay(input: RenderOverlayInput): Promise<Buffer> {
+  try {
+    const metadata = await sharp(input.baseImage).metadata();
     const width = metadata.width ?? 1000;
     const height = metadata.height ?? 1000;
 
@@ -160,17 +197,44 @@ export async function composeOverlay(input: OverlayInput): Promise<string> {
       .render()
       .asPng();
 
-    const composed = await sharp(baseBuffer)
-      .composite([{ input: overlayPng, top: 0, left: 0 }])
-      .png()
-      .toBuffer();
+    const composites: sharp.OverlayOptions[] = [
+      { input: overlayPng, top: 0, left: 0 },
+    ];
 
-    return `data:image/png;base64,${composed.toString("base64")}`;
+    if (input.logoUrl) {
+      const logo = await buildLogoComposite(input.logoUrl, width);
+      if (logo) {
+        composites.push(logo);
+      }
+    }
+
+    return await sharp(input.baseImage).composite(composites).png().toBuffer();
   } catch (err) {
     if (err instanceof HttpError) {
       throw err;
     }
     const message = err instanceof Error ? err.message : "Unknown overlay error";
-    throw HttpError.internal(`Failed to compose overlay: ${message}`);
+    throw HttpError.internal(`Failed to render overlay: ${message}`);
   }
+}
+
+/**
+ * Composites the product name, price and promo over a remote image (spike).
+ * Returns a base64 PNG data URL.
+ */
+export async function composeOverlay(input: OverlayInput): Promise<string> {
+  const res = await fetch(input.imageUrl);
+  if (!res.ok) {
+    throw HttpError.internal(`Failed to fetch base image (${res.status})`);
+  }
+  const baseImage = Buffer.from(await res.arrayBuffer());
+
+  const composed = await renderOverlay({
+    baseImage,
+    productName: input.productName,
+    price: input.price,
+    promo: input.promo,
+  });
+
+  return `data:image/png;base64,${composed.toString("base64")}`;
 }

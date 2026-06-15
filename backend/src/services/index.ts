@@ -10,3 +10,4 @@ export {
   type BrandExtraction,
 } from "./brand";
 export { uploadObject, type UploadResult } from "./storage";
+export { runGenerationJob } from "./generation";
