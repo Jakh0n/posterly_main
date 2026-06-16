@@ -16,6 +16,7 @@ export interface Campaign {
   product_image_url: string | null;
   status: CampaignStatus;
   error: string | null;
+  favorite_creative_id: string | null;
   created_at: string;
 }
 

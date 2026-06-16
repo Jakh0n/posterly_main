@@ -14,12 +14,22 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { BILLING_PACKS, type BillingPackId } from "@/lib/billing";
+import {
+  BILLING_PACKS,
+  formatCampaignOutcome,
+  type BillingKind,
+  type BillingPackId,
+} from "@/lib/billing";
 import { cn } from "@/lib/utils";
 
-export function BillingPacks() {
+export interface BillingPacksProps {
+  kind: BillingKind;
+}
+
+export function BillingPacks({ kind }: BillingPacksProps) {
   const [pendingId, setPendingId] = useState<BillingPackId | null>(null);
   const [, startTransition] = useTransition();
+  const packs = BILLING_PACKS.filter((pack) => pack.kind === kind);
 
   const handleClick = (packId: BillingPackId) => {
     setPendingId(packId);
@@ -38,8 +48,8 @@ export function BillingPacks() {
   };
 
   return (
-    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-      {BILLING_PACKS.map((pack) => (
+    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      {packs.map((pack) => (
         <Card key={pack.id} className={cn(pack.highlighted && "ring-2 ring-primary")}>
           <CardHeader>
             <CardTitle className="flex items-center justify-between">
@@ -61,7 +71,7 @@ export function BillingPacks() {
             </p>
             <p className="flex items-center gap-1.5 text-sm text-muted-foreground">
               <Check className="h-4 w-4 text-primary" />
-              {pack.credits} credits
+              {formatCampaignOutcome(pack.credits)}
             </p>
           </CardContent>
           <CardFooter className="pt-0">
@@ -74,7 +84,7 @@ export function BillingPacks() {
               {pendingId === pack.id ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
               ) : pack.kind === "subscription" ? (
-                "Upgrade"
+                "Subscribe"
               ) : (
                 "Buy credits"
               )}

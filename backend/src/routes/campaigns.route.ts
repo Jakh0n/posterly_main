@@ -1,7 +1,7 @@
 import { Router } from "express";
 import multer from "multer";
 
-import { uploadProductPhoto } from "../controllers/campaigns.controller";
+import { uploadProductPhoto, downloadCampaignAsset } from "../controllers/campaigns.controller";
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -11,5 +11,6 @@ const upload = multer({
 const router = Router();
 
 router.post("/upload", upload.single("photo"), uploadProductPhoto);
+router.get("/download", downloadCampaignAsset);
 
 export { router as campaignsRouter };

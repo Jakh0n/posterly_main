@@ -90,6 +90,7 @@ export interface Database {
           product_image_url: string | null;
           status: CampaignStatus;
           error: string | null;
+          favorite_creative_id: string | null;
           created_at: string;
         };
         Insert: {
@@ -102,6 +103,7 @@ export interface Database {
           product_image_url?: string | null;
           status?: CampaignStatus;
           error?: string | null;
+          favorite_creative_id?: string | null;
           created_at?: string;
         };
         Update: {
@@ -114,6 +116,7 @@ export interface Database {
           product_image_url?: string | null;
           status?: CampaignStatus;
           error?: string | null;
+          favorite_creative_id?: string | null;
           created_at?: string;
         };
         Relationships: [];

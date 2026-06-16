@@ -1,15 +1,15 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import Link from "next/link";
-import { AlertCircle, CheckCircle2, Loader2 } from "lucide-react";
+import { CheckCircle2, Loader2 } from "lucide-react";
 
-import { buttonVariants } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
 import { createBrowserClient } from "@/lib/supabase/client";
+import { cn } from "@/lib/utils";
 import type { Campaign, CampaignStatus, Creative } from "@/types/campaign";
 
+import { CampaignFailedState } from "./CampaignFailedState";
 import { CampaignVariants } from "./CampaignVariants";
+import { CampaignVariantsSkeleton } from "./CampaignVariantsSkeleton";
 
 export interface CampaignProgressProps {
   initialCampaign: Campaign;
@@ -17,11 +17,12 @@ export interface CampaignProgressProps {
 }
 
 interface Stage {
-  key: Exclude<CampaignStatus, "queued" | "done" | "failed">;
+  key: CampaignStatus;
   label: string;
 }
 
 const STAGES: Stage[] = [
+  { key: "queued", label: "Queued — starting soon" },
   { key: "writing", label: "Writing creative briefs" },
   { key: "generating", label: "Painting product scenes" },
   { key: "composing", label: "Composing your posters" },
@@ -38,8 +39,58 @@ const STATUS_ORDER: Record<CampaignStatus, number> = {
 
 const POLL_INTERVAL_MS = 4000;
 
+/** Target variant count; matches `BRIEF_STYLES` in the backend brief service. */
+const EXPECTED_VARIANT_COUNT = 3;
+
 function isTerminal(status: CampaignStatus): boolean {
   return status === "done" || status === "failed";
+}
+
+function countReadyVariants(creatives: Creative[]): number {
+  return creatives.filter((c) => c.final_url).length;
+}
+
+function countPaintedScenes(creatives: Creative[]): number {
+  return creatives.filter((c) => c.background_url).length;
+}
+
+interface StageProgress {
+  percent: number;
+  detail: string;
+}
+
+/**
+ * Derives in-stage progress from creative rows streamed via Realtime.
+ * During `generating`, each inserted creative = one painted scene.
+ * During `composing`, each creative with `final_url` = one finished poster.
+ */
+function getActiveStageProgress(
+  status: CampaignStatus,
+  creatives: Creative[],
+): StageProgress | null {
+  if (status === "generating") {
+    const painted = countPaintedScenes(creatives);
+    const clamped = Math.min(painted, EXPECTED_VARIANT_COUNT);
+    const percent =
+      clamped === 0 ? 5 : Math.round((clamped / EXPECTED_VARIANT_COUNT) * 100);
+    return {
+      percent: Math.min(percent, 100),
+      detail: `${clamped} of ${EXPECTED_VARIANT_COUNT} scenes painted`,
+    };
+  }
+
+  if (status === "composing") {
+    const ready = countReadyVariants(creatives);
+    const total = Math.max(creatives.length, EXPECTED_VARIANT_COUNT);
+    const clamped = Math.min(ready, total);
+    const percent = clamped === 0 ? 5 : Math.round((clamped / total) * 100);
+    return {
+      percent: Math.min(percent, 100),
+      detail: `${clamped} of ${total} posters composed`,
+    };
+  }
+
+  return null;
 }
 
 export function CampaignProgress({
@@ -48,6 +99,10 @@ export function CampaignProgress({
 }: CampaignProgressProps) {
   const [campaign, setCampaign] = useState<Campaign>(initialCampaign);
   const [creatives, setCreatives] = useState<Creative[]>(initialCreatives);
+  const [favoriteCreativeId, setFavoriteCreativeId] = useState<string | null>(
+    initialCampaign.favorite_creative_id,
+  );
+  const [hasLiveUpdate, setHasLiveUpdate] = useState(false);
   const supabaseRef = useRef(createBrowserClient());
 
   const mergeCreative = useCallback((next: Creative) => {
@@ -59,6 +114,50 @@ export function CampaignProgress({
       return merged.sort((a, b) => a.variant_index - b.variant_index);
     });
   }, []);
+
+  const applyCampaignRow = useCallback((row: Campaign) => {
+    setCampaign(row);
+    setFavoriteCreativeId(row.favorite_creative_id ?? null);
+    setHasLiveUpdate(true);
+  }, []);
+
+  const handleRegenerated = useCallback(() => {
+    setCampaign((prev) => ({
+      ...prev,
+      status: "queued",
+      error: null,
+      favorite_creative_id: null,
+    }));
+    setCreatives([]);
+    setFavoriteCreativeId(null);
+    setHasLiveUpdate(true);
+  }, []);
+
+  const refreshCampaign = useCallback(async () => {
+    const supabase = supabaseRef.current;
+    const campaignId = initialCampaign.id;
+
+    const { data: row } = await supabase
+      .from("campaigns")
+      .select("*")
+      .eq("id", campaignId)
+      .maybeSingle();
+    if (row) {
+      applyCampaignRow(row as Campaign);
+    }
+
+    const { data: rows } = await supabase
+      .from("creatives")
+      .select("*")
+      .eq("campaign_id", campaignId)
+      .order("variant_index", { ascending: true });
+    if (rows) {
+      setCreatives(rows as Creative[]);
+      if (rows.length > 0) {
+        setHasLiveUpdate(true);
+      }
+    }
+  }, [applyCampaignRow, initialCampaign.id]);
 
   useEffect(() => {
     const supabase = supabaseRef.current;
@@ -83,7 +182,7 @@ export function CampaignProgress({
         },
         (payload) => {
           if (active) {
-            setCampaign((prev) => ({ ...prev, ...(payload.new as Campaign) }));
+            applyCampaignRow(payload.new as Campaign);
           }
         },
       )
@@ -96,7 +195,21 @@ export function CampaignProgress({
           filter: `campaign_id=eq.${campaignId}`,
         },
         (payload) => {
-          if (active && payload.new && "id" in payload.new) {
+          if (!active) {
+            return;
+          }
+          setHasLiveUpdate(true);
+          if (
+            payload.eventType === "DELETE" &&
+            payload.old &&
+            "id" in payload.old
+          ) {
+            setCreatives((prev) =>
+              prev.filter((c) => c.id !== (payload.old as Creative).id),
+            );
+            return;
+          }
+          if (payload.new && "id" in payload.new) {
             mergeCreative(payload.new as Creative);
           }
         },
@@ -107,61 +220,40 @@ export function CampaignProgress({
       active = false;
       void supabase.removeChannel(channel);
     };
-  }, [initialCampaign.id, mergeCreative]);
+  }, [applyCampaignRow, initialCampaign.id, mergeCreative]);
 
-  // Polling fallback: guarantees progress is reflected even if a Realtime
-  // event is missed. Stops once the campaign reaches a terminal state.
+  // Immediate refresh on mount so progress appears before the first Realtime
+  // event (or the 4s polling tick).
+  useEffect(() => {
+    void refreshCampaign();
+  }, [refreshCampaign]);
+
   useEffect(() => {
     if (isTerminal(campaign.status)) {
       return;
     }
 
-    const supabase = supabaseRef.current;
-    const campaignId = initialCampaign.id;
-
-    const interval = setInterval(async () => {
-      const { data: row } = await supabase
-        .from("campaigns")
-        .select("*")
-        .eq("id", campaignId)
-        .maybeSingle();
-      if (row) {
-        setCampaign(row as Campaign);
-      }
-
-      const { data: rows } = await supabase
-        .from("creatives")
-        .select("*")
-        .eq("campaign_id", campaignId)
-        .order("variant_index", { ascending: true });
-      if (rows) {
-        setCreatives(rows as Creative[]);
-      }
+    const interval = setInterval(() => {
+      void refreshCampaign();
     }, POLL_INTERVAL_MS);
 
     return () => clearInterval(interval);
-  }, [campaign.status, initialCampaign.id]);
+  }, [campaign.status, refreshCampaign]);
 
   const currentOrder = STATUS_ORDER[campaign.status];
+  const readyCount = countReadyVariants(creatives);
+  const stageProgress = getActiveStageProgress(campaign.status, creatives);
+  const showVariantSkeleton =
+    !isTerminal(campaign.status) &&
+    (readyCount === 0 || (!hasLiveUpdate && campaign.status === "queued"));
 
   if (campaign.status === "failed") {
     return (
-      <div className="flex flex-col gap-6">
-        <div className="flex flex-col items-center gap-3 rounded-xl border border-destructive/30 bg-destructive/5 px-6 py-12 text-center">
-          <AlertCircle className="h-8 w-8 text-destructive" />
-          <h2 className="text-lg font-semibold">Generation failed</h2>
-          <p className="max-w-md text-sm text-muted-foreground">
-            {campaign.error ?? "Something went wrong while generating."} Your
-            credit has been refunded.
-          </p>
-          <Link
-            href="/campaigns/new"
-            className={cn(buttonVariants(), "mt-2")}
-          >
-            Try again
-          </Link>
-        </div>
-      </div>
+      <CampaignFailedState
+        campaignId={campaign.id}
+        error={campaign.error}
+        onRegenerated={handleRegenerated}
+      />
     );
   }
 
@@ -173,39 +265,77 @@ export function CampaignProgress({
             const order = STATUS_ORDER[stage.key];
             const done = currentOrder > order;
             const active = currentOrder === order;
+            const progress = active ? stageProgress : null;
             return (
               <li
                 key={stage.key}
                 className={cn(
-                  "flex items-center gap-3 rounded-lg border px-4 py-3 text-sm",
+                  "rounded-lg border px-4 py-3 text-sm",
                   active && "border-primary/40 bg-primary/5",
                   done && "border-border bg-muted/40 text-muted-foreground",
                   !active && !done && "border-border/60 text-muted-foreground",
                 )}
               >
-                {done ? (
-                  <CheckCircle2 className="h-4 w-4 text-primary" />
-                ) : active ? (
-                  <Loader2 className="h-4 w-4 animate-spin text-primary" />
-                ) : (
-                  <span className="h-4 w-4 rounded-full border border-current" />
-                )}
-                <span className="font-medium">
-                  {stage.label}
-                  {active ? "…" : ""}
-                </span>
+                <div className="flex items-start gap-3">
+                  <span className="mt-0.5 shrink-0">
+                    {done ? (
+                      <CheckCircle2 className="h-4 w-4 text-primary" />
+                    ) : active ? (
+                      <Loader2 className="h-4 w-4 animate-spin text-primary" />
+                    ) : (
+                      <span className="block h-4 w-4 rounded-full border border-current" />
+                    )}
+                  </span>
+                  <div className="flex min-w-0 flex-1 flex-col gap-2">
+                    <span className="font-medium">
+                      {stage.label}
+                      {active && progress
+                        ? ` — ${progress.percent}%`
+                        : active
+                          ? "…"
+                          : ""}
+                    </span>
+                    {active && progress ? (
+                      <>
+                        <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
+                          <div
+                            className="h-full rounded-full bg-primary transition-[width] duration-500 ease-out"
+                            style={{ width: `${progress.percent}%` }}
+                          />
+                        </div>
+                        <span className="text-xs text-muted-foreground">
+                          {progress.detail}
+                        </span>
+                      </>
+                    ) : null}
+                  </div>
+                </div>
               </li>
             );
           })}
         </ol>
-      ) : (
+      ) : readyCount > 0 ? (
         <div className="flex items-center gap-2 text-sm font-medium text-primary">
           <CheckCircle2 className="h-4 w-4" />
-          Your 3 variants are ready.
+          Your {readyCount} variant{readyCount === 1 ? "" : "s"} ready.
+        </div>
+      ) : (
+        <div className="rounded-lg border border-border/60 bg-muted/30 px-4 py-6 text-center text-sm text-muted-foreground">
+          Generation finished, but no variants were produced. Start a new
+          campaign to try again.
         </div>
       )}
 
-      <CampaignVariants creatives={creatives} />
+      {showVariantSkeleton ? (
+        <CampaignVariantsSkeleton />
+      ) : (
+        <CampaignVariants
+          campaignId={campaign.id}
+          creatives={creatives}
+          favoriteCreativeId={favoriteCreativeId}
+          onFavoriteChange={setFavoriteCreativeId}
+        />
+      )}
     </div>
   );
 }

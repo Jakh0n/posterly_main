@@ -1,23 +1,21 @@
 import sharp from "sharp";
+import { toFile } from "openai";
 
 import { env } from "../../lib/env";
-import { getFal } from "../../lib/fal";
+import { getOpenAI } from "../../lib/openai";
 import { HttpError } from "../../lib/httpError";
 import { uploadObject } from "../storage";
 import type { Brief } from "./brief";
 
-const FAL_MODEL = "fal-ai/bria/product-shot";
+const IMAGE_MODEL = "gpt-image-1";
+const IMAGE_SIZE = "1024x1024";
 
 const HEX_COLOR = /^#([0-9a-fA-F]{6})$/;
 const FALLBACK_PALETTE = ["#0f172a", "#334155"] as const;
 
-/**
- * Whether to skip the real fal call and render a local placeholder instead.
- * Enabled explicitly via MOCK_GENERATION, or implicitly when no real fal key
- * is configured (so the pipeline stays runnable in development).
- */
+/** When true, renders a local placeholder instead of calling OpenAI. Dev/test only. */
 function isMockEnabled(): boolean {
-  return env.MOCK_GENERATION || env.FAL_KEY.trim().toLowerCase() === "dummy";
+  return env.MOCK_GENERATION;
 }
 
 export interface ProductImageInput {
@@ -25,33 +23,8 @@ export interface ProductImageInput {
   brief: Brief;
 }
 
-interface BriaImage {
-  url: string;
-}
-
-interface BriaResult {
-  images?: BriaImage[];
-}
-
 /**
- * Uploads the raw product photo to fal storage and returns its public URL.
- */
-export async function uploadProductImage(
-  file: Buffer,
-  mimeType: string,
-): Promise<string> {
-  try {
-    const fal = getFal();
-    const blob = new Blob([new Uint8Array(file)], { type: mimeType });
-    return await fal.storage.upload(blob);
-  } catch (err) {
-    const message = err instanceof Error ? err.message : "Unknown upload error";
-    throw HttpError.internal(`Failed to upload product image: ${message}`);
-  }
-}
-
-/**
- * Builds the fal scene description from the brief's structured fields only.
+ * Builds the image-edit prompt from the brief's structured fields only.
  * Raw GPT prose is never forwarded — every field is composed deliberately.
  */
 function buildSceneDescription(brief: Brief): string {
@@ -63,15 +36,15 @@ function buildSceneDescription(brief: Brief): string {
     `${brief.composition}, with generous empty negative space reserved for headline text`,
     `shot on ${brief.camera}`,
     "clean professional advertising product photograph",
+    "preserve the uploaded product exactly as shown",
     "no text, no logos, no watermarks, no captions",
   ].join(". ");
 }
 
 /**
  * Renders a product-preserving placeholder: the real uploaded product centered
- * over a gradient derived from the brief's palette. Used when fal is not
- * configured so the full pipeline (and its tests) can run locally.
- * Returns the public URL of the uploaded placeholder.
+ * over a gradient derived from the brief's palette. Used when MOCK_GENERATION is
+ * enabled so the full pipeline can run locally without a paid image call.
  */
 async function generateMockProductImage(
   input: ProductImageInput,
@@ -132,9 +105,8 @@ async function generateMockProductImage(
 }
 
 /**
- * Generates a lifestyle ad image while preserving the real uploaded product
- * (Bria product-shot keeps the product and only synthesises the scene).
- * Returns the URL of the generated image.
+ * Generates a lifestyle ad scene around the uploaded product via OpenAI
+ * gpt-image-1 (images.edit). Returns the public URL of the scene image.
  */
 export async function generateProductImage(
   input: ProductImageInput,
@@ -144,27 +116,32 @@ export async function generateProductImage(
   }
 
   try {
-    const fal = getFal();
-
-    const result = await fal.subscribe(FAL_MODEL, {
-      input: {
-        image_url: input.productImageUrl,
-        scene_description: buildSceneDescription(input.brief),
-        placement_type: "manual_placement",
-        manual_placement_selection: "bottom_center",
-        num_results: 1,
-        fast: true,
-        sync_mode: true,
-        shot_size: [1000, 1000],
-      },
+    const openai = getOpenAI();
+    const res = await fetch(input.productImageUrl);
+    if (!res.ok) {
+      throw HttpError.internal(`Failed to fetch product image (${res.status})`);
+    }
+    const productBuffer = Buffer.from(await res.arrayBuffer());
+    const productFile = await toFile(productBuffer, "product.png", {
+      type: "image/png",
     });
 
-    const data = result.data as BriaResult;
-    const url = data.images?.[0]?.url;
-    if (!url) {
-      throw HttpError.internal("fal.ai returned no product image");
+    const result = await openai.images.edit({
+      model: IMAGE_MODEL,
+      image: productFile,
+      prompt: buildSceneDescription(input.brief),
+      size: IMAGE_SIZE,
+      quality: "medium",
+      n: 1,
+    });
+
+    const b64 = result.data?.[0]?.b64_json;
+    if (!b64) {
+      throw HttpError.internal("OpenAI returned no image data");
     }
 
+    const png = Buffer.from(b64, "base64");
+    const { url } = await uploadObject(png, "image/png", "campaigns/scenes");
     return url;
   } catch (err) {
     if (err instanceof HttpError) {

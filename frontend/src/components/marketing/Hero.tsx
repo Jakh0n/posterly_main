@@ -47,7 +47,7 @@ export function Hero() {
         </div>
 
         <p className="mt-4 text-xs text-muted-foreground">
-          No credit card required. Free posters every month.
+          No credit card required. 3 free campaigns to start.
         </p>
       </div>
     </section>

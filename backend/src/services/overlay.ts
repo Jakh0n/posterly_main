@@ -4,13 +4,6 @@ import sharp from "sharp";
 
 import { HttpError } from "../lib/httpError";
 
-export interface OverlayInput {
-  imageUrl: string;
-  productName: string;
-  price: string;
-  promo: string;
-}
-
 export interface RenderOverlayInput {
   baseImage: Buffer;
   productName: string;
@@ -216,25 +209,4 @@ export async function renderOverlay(input: RenderOverlayInput): Promise<Buffer> 
     const message = err instanceof Error ? err.message : "Unknown overlay error";
     throw HttpError.internal(`Failed to render overlay: ${message}`);
   }
-}
-
-/**
- * Composites the product name, price and promo over a remote image (spike).
- * Returns a base64 PNG data URL.
- */
-export async function composeOverlay(input: OverlayInput): Promise<string> {
-  const res = await fetch(input.imageUrl);
-  if (!res.ok) {
-    throw HttpError.internal(`Failed to fetch base image (${res.status})`);
-  }
-  const baseImage = Buffer.from(await res.arrayBuffer());
-
-  const composed = await renderOverlay({
-    baseImage,
-    productName: input.productName,
-    price: input.price,
-    promo: input.promo,
-  });
-
-  return `data:image/png;base64,${composed.toString("base64")}`;
 }

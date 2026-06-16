@@ -163,7 +163,7 @@ async function main() {
   await sleep(1000); // allow handle_new_user trigger to land the signup bonus
   const startBalance = await balance(userId);
   log("START_BALANCE", startBalance);
-  assert(startBalance === 5, "new user starts with 5 credits");
+  assert(startBalance === 3, "new user starts with 3 credits");
 
   // ---- Happy path ----
   log("\n[1] Happy path: queued -> done with 3 variants");

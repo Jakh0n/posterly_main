@@ -118,15 +118,15 @@ export async function runGenerationJob(campaignId: string): Promise<void> {
       productImageUrl,
     });
 
-    // ---- generating: product-preserving fal render per brief ----
+    // ---- generating: OpenAI scene render per brief ----
     await setStatus(supabase, campaignId, "generating");
     const variants: GeneratedVariant[] = [];
 
     for (let index = 0; index < briefs.length; index += 1) {
       const { style, brief } = briefs[index];
 
-      const falUrl = await generateProductImage({ productImageUrl, brief });
-      const backgroundImage = await downloadImage(falUrl);
+      const sceneImageUrl = await generateProductImage({ productImageUrl, brief });
+      const backgroundImage = await downloadImage(sceneImageUrl);
       const background = await uploadObject(
         backgroundImage,
         "image/png",

@@ -9,6 +9,5 @@ export {
 } from "./brief";
 export {
   generateProductImage,
-  uploadProductImage,
   type ProductImageInput,
 } from "./image";

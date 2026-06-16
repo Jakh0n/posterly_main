@@ -7,17 +7,13 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { PLAN_LABEL } from "@/lib/billing";
 import type { UserPlan } from "@/services";
 
 export interface PlanCardProps {
   plan: UserPlan;
   balance: number;
 }
-
-const PLAN_LABEL: Record<UserPlan, string> = {
-  free: "Free",
-  pro: "Pro",
-};
 
 export function PlanCard({ plan, balance }: PlanCardProps) {
   return (

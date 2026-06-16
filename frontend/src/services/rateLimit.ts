@@ -1,14 +1,19 @@
 import { createServerClient } from "@/lib/supabase/server";
+import {
+  FREE_TIER_DAILY_CAP,
+  PAID_TIER_DAILY_CAP,
+  isPaidPlan,
+  type UserPlan,
+} from "@/lib/billing";
+
+export type { UserPlan };
 
 /** Max campaigns any user may start within the rolling burst window. */
 export const RATE_LIMIT_MAX = 3;
 const RATE_LIMIT_WINDOW_MS = 60_000;
-
-/** Hard cap on campaigns a free-tier user may start per rolling 24h. */
-export const FREE_TIER_DAILY_CAP = 10;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-export type UserPlan = "free" | "pro";
+export { FREE_TIER_DAILY_CAP, PAID_TIER_DAILY_CAP };
 
 export interface RateLimitResult {
   allowed: boolean;
@@ -19,11 +24,11 @@ export interface UsageStatus {
   plan: UserPlan;
   /** Campaigns started in the last 24h. */
   dailyUsed: number;
-  /** Daily cap for the plan; null means unlimited (paid plans). */
-  dailyCap: number | null;
-  /** Remaining campaigns today; null when unlimited. */
-  remaining: number | null;
-  /** True when a free-tier user has hit their daily cap. */
+  /** Daily cap for the plan; null should not occur (all plans are capped). */
+  dailyCap: number;
+  /** Remaining campaigns today. */
+  remaining: number;
+  /** True when the user has hit their daily cap. */
   capReached: boolean;
 }
 
@@ -47,6 +52,10 @@ async function countCampaignsSince(
   return count ?? 0;
 }
 
+function dailyCapForPlan(plan: UserPlan): number {
+  return plan === "free" ? FREE_TIER_DAILY_CAP : PAID_TIER_DAILY_CAP;
+}
+
 async function getUserPlan(
   supabase: ServerClient,
   userId: string,
@@ -57,27 +66,19 @@ async function getUserPlan(
     .eq("id", userId)
     .maybeSingle();
 
-  return profile?.plan === "pro" ? "pro" : "free";
+  const plan = profile?.plan;
+  return isPaidPlan(plan) ? plan : "free";
 }
 
 /**
- * Returns the user's plan and free-tier usage against the daily cap. Shared by
- * the rate limiter and the billing page so cap messaging stays consistent.
+ * Returns the user's plan and usage against their daily cap. Shared by the
+ * rate limiter and the billing page so cap messaging stays consistent.
  * Server-only.
  */
 export async function getUsageStatus(userId: string): Promise<UsageStatus> {
   const supabase = await createServerClient();
   const plan = await getUserPlan(supabase, userId);
-
-  if (plan !== "free") {
-    return {
-      plan,
-      dailyUsed: 0,
-      dailyCap: null,
-      remaining: null,
-      capReached: false,
-    };
-  }
+  const dailyCap = dailyCapForPlan(plan);
 
   const dailyUsed = await countCampaignsSince(
     supabase,
@@ -88,14 +89,14 @@ export async function getUsageStatus(userId: string): Promise<UsageStatus> {
   return {
     plan,
     dailyUsed,
-    dailyCap: FREE_TIER_DAILY_CAP,
-    remaining: Math.max(0, FREE_TIER_DAILY_CAP - dailyUsed),
-    capReached: dailyUsed >= FREE_TIER_DAILY_CAP,
+    dailyCap,
+    remaining: Math.max(0, dailyCap - dailyUsed),
+    capReached: dailyUsed >= dailyCap,
   };
 }
 
 /**
- * Enforces per-user generation throttling and the free-tier hard cap.
+ * Enforces per-user generation throttling and the plan daily cap.
  * RLS-scoped: each user can only ever count their own campaigns. Server-only.
  */
 export async function checkGenerationRateLimit(
@@ -116,19 +117,22 @@ export async function checkGenerationRateLimit(
   }
 
   const plan = await getUserPlan(supabase, userId);
-  if (plan === "free") {
-    const daily = await countCampaignsSince(
-      supabase,
-      userId,
-      new Date(Date.now() - DAY_MS),
-    );
-    if (daily >= FREE_TIER_DAILY_CAP) {
-      return {
-        allowed: false,
-        reason:
-          "You've reached the free-tier daily limit. Upgrade to keep creating.",
-      };
-    }
+  const dailyCap = dailyCapForPlan(plan);
+  const daily = await countCampaignsSince(
+    supabase,
+    userId,
+    new Date(Date.now() - DAY_MS),
+  );
+
+  if (daily >= dailyCap) {
+    const upgradeHint =
+      plan === "free"
+        ? "Upgrade to keep creating."
+        : "You've hit today's limit. Try again tomorrow or buy a credit pack.";
+    return {
+      allowed: false,
+      reason: `You've reached your daily limit of ${dailyCap} campaigns. ${upgradeHint}`,
+    };
   }
 
   return { allowed: true };

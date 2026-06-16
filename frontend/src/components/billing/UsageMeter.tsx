@@ -1,4 +1,4 @@
-import { AlertTriangle, Infinity as InfinityIcon } from "lucide-react";
+import { AlertTriangle } from "lucide-react";
 
 import {
   Card,
@@ -7,6 +7,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { PLAN_LABEL } from "@/lib/billing";
 import { cn } from "@/lib/utils";
 import type { UsageStatus } from "@/services";
 
@@ -15,29 +16,18 @@ export interface UsageMeterProps {
 }
 
 export function UsageMeter({ usage }: UsageMeterProps) {
-  if (usage.dailyCap === null) {
-    return (
-      <Card>
-        <CardHeader>
-          <CardTitle>Daily usage</CardTitle>
-          <CardDescription>Pro plan — no daily limit.</CardDescription>
-        </CardHeader>
-        <CardContent className="flex items-center gap-2 text-sm text-muted-foreground">
-          <InfinityIcon className="h-4 w-4 text-primary" />
-          Unlimited campaigns per day
-        </CardContent>
-      </Card>
-    );
-  }
-
-  const pct = Math.min(100, Math.round((usage.dailyUsed / usage.dailyCap) * 100));
+  const pct = Math.min(
+    100,
+    Math.round((usage.dailyUsed / usage.dailyCap) * 100),
+  );
 
   return (
     <Card>
       <CardHeader>
         <CardTitle>Daily usage</CardTitle>
         <CardDescription>
-          {usage.dailyUsed} of {usage.dailyCap} campaigns used today
+          {usage.dailyUsed} of {usage.dailyCap} campaigns used today on the{" "}
+          {PLAN_LABEL[usage.plan]} plan
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
@@ -53,12 +43,14 @@ export function UsageMeter({ usage }: UsageMeterProps) {
         {usage.capReached ? (
           <p className="flex items-center gap-2 text-sm font-medium text-destructive">
             <AlertTriangle className="h-4 w-4" />
-            You&apos;ve hit the free-tier daily limit. Upgrade to keep creating.
+            {usage.plan === "free"
+              ? "You've hit the free daily limit. Upgrade to keep creating."
+              : "You've hit today's limit. Try again tomorrow or buy a credit pack."}
           </p>
         ) : (
           <p className="text-sm text-muted-foreground">
             {usage.remaining} campaign{usage.remaining === 1 ? "" : "s"} left
-            today on the free plan.
+            today.
           </p>
         )}
       </CardContent>

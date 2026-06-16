@@ -3,9 +3,9 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
-import { env } from "@/lib/env";
 import { createServerClient } from "@/lib/supabase/server";
 import { createCampaignSchema } from "@/lib/validations/campaign";
+import { enqueueGenerationJob } from "@/services/campaignJobs";
 import { checkGenerationRateLimit } from "@/services/rateLimit";
 import type { CreateCampaignInput } from "@/lib/validations/campaign";
 
@@ -14,31 +14,6 @@ export interface CreateCampaignResult {
 }
 
 const CAMPAIGN_COST = 1;
-
-/**
- * Enqueues the async generation job on the backend worker. Returns true on a
- * 202 accept. Authenticated with a shared worker secret when configured.
- */
-async function enqueueGenerationJob(campaignId: string): Promise<boolean> {
-  try {
-    const headers: Record<string, string> = {
-      "Content-Type": "application/json",
-    };
-    if (process.env.WORKER_SECRET) {
-      headers["x-worker-secret"] = process.env.WORKER_SECRET;
-    }
-
-    const res = await fetch(`${env.NEXT_PUBLIC_API_URL}/api/v1/jobs/generate`, {
-      method: "POST",
-      headers,
-      body: JSON.stringify({ campaignId }),
-    });
-
-    return res.ok;
-  } catch {
-    return false;
-  }
-}
 
 /**
  * Creates a campaign and kicks off generation. The credit ledger is debited

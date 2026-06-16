@@ -1,5 +1,6 @@
 import { createServerClient } from "../../lib/supabase";
 import { logger } from "../../utils/logger";
+import type { UserPlan } from "./catalog";
 
 type Supabase = ReturnType<typeof createServerClient>;
 
@@ -54,11 +55,11 @@ export async function grantPurchasedCredits(
 }
 
 /**
- * Sets the user's plan on their profile (e.g. 'pro' or 'free').
+ * Sets the user's plan on their profile (e.g. 'lite', 'pro', or 'free').
  */
 export async function setUserPlan(
   userId: string,
-  plan: "free" | "pro",
+  plan: UserPlan,
 ): Promise<void> {
   const supabase: Supabase = createServerClient();
   const { error } = await supabase

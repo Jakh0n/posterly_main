@@ -14,7 +14,6 @@ const envSchema = z.object({
 
   // AI providers
   OPENAI_API_KEY: z.string().min(1),
-  FAL_KEY: z.string().min(1),
 
   // Cloudflare R2 storage
   R2_ACCOUNT_ID: z.string().min(1),
@@ -32,7 +31,9 @@ const envSchema = z.object({
   POLAR_PRODUCT_CREDITS_S: z.string().optional(),
   POLAR_PRODUCT_CREDITS_M: z.string().optional(),
   POLAR_PRODUCT_CREDITS_L: z.string().optional(),
+  POLAR_PRODUCT_LITE: z.string().optional(),
   POLAR_PRODUCT_PRO: z.string().optional(),
+  POLAR_PRODUCT_STUDIO: z.string().optional(),
 
   // Public base URL of the frontend, used for checkout success/cancel redirects.
   APP_URL: z.string().url().default("http://localhost:3000"),
@@ -41,8 +42,8 @@ const envSchema = z.object({
   // Optional in development; set it in production to lock down /jobs/generate.
   WORKER_SECRET: z.string().optional(),
 
-  // When true (or when FAL_KEY is a placeholder), the image step renders a
-  // local product-preserving placeholder instead of calling fal. Dev/test only.
+  // When true, the image step renders a local placeholder instead of calling
+  // OpenAI. Dev/test only.
   MOCK_GENERATION: z
     .enum(["true", "false"])
     .optional()

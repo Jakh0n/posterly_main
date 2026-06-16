@@ -80,10 +80,25 @@ async function main(): Promise<void> {
   const subId = `test_sub_${Date.now()}`;
   await handlePolarEvent({
     type: "subscription.active",
-    data: { id: subId, status: "active", metadata: { userId } },
+    data: {
+      id: subId,
+      status: "active",
+      metadata: { userId, packId: "lite" },
+    },
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
   } as any);
-  assert((await getPlan(userId)) === "pro", "subscription.active sets plan = pro");
+  assert((await getPlan(userId)) === "lite", "subscription.active sets plan from packId");
+
+  await handlePolarEvent({
+    type: "subscription.updated",
+    data: {
+      id: subId,
+      status: "active",
+      metadata: { userId, packId: "studio" },
+    },
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  } as any);
+  assert((await getPlan(userId)) === "studio", "subscription.updated can change plan tier");
 
   await handlePolarEvent({
     type: "subscription.revoked",

@@ -6,6 +6,7 @@ import {
   setUserPlan,
   upsertSubscription,
 } from "./account";
+import { planFromPackId } from "./catalog";
 
 export type PolarEvent = ReturnType<typeof validateEvent>;
 
@@ -49,7 +50,7 @@ function toIso(value: string | Date | null | undefined): string | null {
 /**
  * Processes a verified Polar webhook event:
  * - order.paid           → grant purchased credits (idempotent by order id)
- * - subscription.active  → mark plan 'pro' + upsert subscription
+ * - subscription.active  → mark plan from packId + upsert subscription
  * - subscription.canceled/revoked → mark plan 'free' + update subscription
  * Unhandled event types are logged and ignored.
  */
@@ -94,7 +95,7 @@ export async function handlePolarEvent(event: PolarEvent): Promise<void> {
       });
 
       if ((payload.status ?? "active") === "active") {
-        await setUserPlan(userId, "pro");
+        await setUserPlan(userId, planFromPackId(metaString(payload, "packId")));
       }
       return;
     }

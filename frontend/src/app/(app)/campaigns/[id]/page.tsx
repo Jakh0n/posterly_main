@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 
-import { CampaignProgress } from "@/components/campaigns";
+import { CampaignActions, CampaignProgress } from "@/components/campaigns";
 import { getCampaignWithCreatives } from "@/services";
 
 interface CampaignDetailPageProps {
@@ -21,14 +21,19 @@ export default async function CampaignDetailPage({
 
   return (
     <div className="mx-auto flex w-full max-w-4xl flex-col gap-8">
-      <div className="flex flex-col gap-1">
-        <h1 className="text-2xl font-semibold tracking-tight">
-          {campaign.product_name}
-        </h1>
-        <p className="text-sm text-muted-foreground">
-          {campaign.price ? `${campaign.price} · ` : ""}
-          {campaign.promo}
-        </p>
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div className="flex flex-col gap-1">
+          <h1 className="text-2xl font-semibold tracking-tight">
+            {campaign.product_name}
+          </h1>
+          <p className="text-sm text-muted-foreground">
+            {campaign.price ? `${campaign.price} · ` : ""}
+            {campaign.promo}
+          </p>
+        </div>
+        {campaign.status !== "failed" ? (
+          <CampaignActions campaignId={campaign.id} status={campaign.status} />
+        ) : null}
       </div>
 
       <CampaignProgress
