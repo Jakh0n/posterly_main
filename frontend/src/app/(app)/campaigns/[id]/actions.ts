@@ -3,12 +3,20 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
+import { env } from "@/lib/env";
 import { createServerClient } from "@/lib/supabase/server";
 import { enqueueGenerationJob } from "@/services/campaignJobs";
 import { checkGenerationRateLimit } from "@/services/rateLimit";
 
 export interface CampaignActionResult {
   error?: string;
+}
+
+export interface DownloadCreativeResult {
+  error?: string;
+  base64?: string;
+  filename?: string;
+  contentType?: string;
 }
 
 const CAMPAIGN_COST = 1;
@@ -193,4 +201,69 @@ export async function setFavoriteCreative(
 
   revalidatePath(`/campaigns/${campaignId}`);
   return { favoriteCreativeId: nextFavorite };
+}
+
+/**
+ * Downloads a campaign poster via the authenticated backend proxy. Free-tier
+ * users receive a watermarked export.
+ */
+export async function downloadCreativeAsset(
+  campaignId: string,
+  assetUrl: string,
+  filename: string,
+): Promise<DownloadCreativeResult> {
+  const ctx = await requireOwnedCampaign(campaignId);
+  if ("error" in ctx) {
+    return { error: ctx.error };
+  }
+
+  const { supabase } = ctx;
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+
+  if (!session?.access_token) {
+    return { error: "You must be signed in to download." };
+  }
+
+  const { data: creative, error: creativeError } = await supabase
+    .from("creatives")
+    .select("id")
+    .eq("campaign_id", campaignId)
+    .eq("final_url", assetUrl)
+    .maybeSingle();
+
+  if (creativeError || !creative) {
+    return { error: "Poster not found." };
+  }
+
+  try {
+    const params = new URLSearchParams({ url: assetUrl, filename });
+    const res = await fetch(
+      `${env.NEXT_PUBLIC_API_URL}/api/v1/campaigns/download?${params}`,
+      {
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+        },
+      },
+    );
+
+    if (!res.ok) {
+      const payload = (await res.json().catch(() => null)) as
+        | { error?: { message?: string } }
+        | null;
+      return {
+        error: payload?.error?.message ?? "Could not download poster.",
+      };
+    }
+
+    const buffer = Buffer.from(await res.arrayBuffer());
+    return {
+      base64: buffer.toString("base64"),
+      filename,
+      contentType: res.headers.get("content-type") ?? "image/png",
+    };
+  } catch {
+    return { error: "Could not reach the download service." };
+  }
 }

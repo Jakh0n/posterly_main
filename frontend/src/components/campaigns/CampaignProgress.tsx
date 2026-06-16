@@ -14,6 +14,7 @@ import { CampaignVariantsSkeleton } from "./CampaignVariantsSkeleton";
 export interface CampaignProgressProps {
   initialCampaign: Campaign;
   initialCreatives: Creative[];
+  watermarkExports: boolean;
 }
 
 interface Stage {
@@ -96,6 +97,7 @@ function getActiveStageProgress(
 export function CampaignProgress({
   initialCampaign,
   initialCreatives,
+  watermarkExports,
 }: CampaignProgressProps) {
   const [campaign, setCampaign] = useState<Campaign>(initialCampaign);
   const [creatives, setCreatives] = useState<Creative[]>(initialCreatives);
@@ -333,6 +335,7 @@ export function CampaignProgress({
           campaignId={campaign.id}
           creatives={creatives}
           favoriteCreativeId={favoriteCreativeId}
+          watermarkExports={watermarkExports}
           onFavoriteChange={setFavoriteCreativeId}
         />
       )}

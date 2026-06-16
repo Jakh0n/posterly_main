@@ -7,6 +7,7 @@ export interface CampaignVariantsProps {
   campaignId: string;
   creatives: Creative[];
   favoriteCreativeId: string | null;
+  watermarkExports: boolean;
   onFavoriteChange: (creativeId: string | null) => void;
 }
 
@@ -14,6 +15,7 @@ export function CampaignVariants({
   campaignId,
   creatives,
   favoriteCreativeId,
+  watermarkExports,
   onFavoriteChange,
 }: CampaignVariantsProps) {
   const ready = creatives
@@ -32,6 +34,7 @@ export function CampaignVariants({
           campaignId={campaignId}
           creative={creative}
           isFavorite={favoriteCreativeId === creative.id}
+          watermarkExports={watermarkExports}
           onFavoriteChange={onFavoriteChange}
         />
       ))}

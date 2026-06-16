@@ -1,7 +1,7 @@
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 
 import { CampaignActions, CampaignProgress } from "@/components/campaigns";
-import { getCampaignWithCreatives } from "@/services";
+import { getCampaignWithCreatives, getCurrentUser, getUsageStatus } from "@/services";
 
 interface CampaignDetailPageProps {
   params: Promise<{ id: string }>;
@@ -11,6 +11,11 @@ export default async function CampaignDetailPage({
   params,
 }: CampaignDetailPageProps) {
   const { id } = await params;
+  const user = await getCurrentUser();
+  if (!user) {
+    redirect("/login");
+  }
+
   const data = await getCampaignWithCreatives(id);
 
   if (!data) {
@@ -18,6 +23,7 @@ export default async function CampaignDetailPage({
   }
 
   const { campaign, creatives } = data;
+  const usage = await getUsageStatus(user.id);
 
   return (
     <div className="mx-auto flex w-full max-w-4xl flex-col gap-8">
@@ -39,6 +45,7 @@ export default async function CampaignDetailPage({
       <CampaignProgress
         initialCampaign={campaign}
         initialCreatives={creatives}
+        watermarkExports={usage.plan === "free"}
       />
     </div>
   );

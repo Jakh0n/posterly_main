@@ -21,7 +21,7 @@ export default async function BillingPage() {
         <h1 className="text-2xl font-semibold tracking-tight">Billing</h1>
         <p className="text-sm text-muted-foreground">
           Manage your plan, credits and top-ups. 1 credit = 1 campaign with 3
-          poster variants.
+          poster variants. Free exports include a watermark.
         </p>
       </div>
 

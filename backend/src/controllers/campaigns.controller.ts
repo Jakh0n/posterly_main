@@ -1,9 +1,13 @@
 import type { NextFunction, Request, Response } from "express";
 
-import { env } from "../lib/env";
+import { getUserFromRequest } from "../lib/auth";
 import { ok } from "../lib/api";
+import { env } from "../lib/env";
 import { HttpError } from "../lib/httpError";
+import { isPaidPlan } from "../services/billing/catalog";
+import { createServerClient } from "../lib/supabase";
 import { uploadObject } from "../services/storage";
+import { applyWatermark } from "../services/watermark";
 
 const ALLOWED_PHOTO_MIME = new Set([
   "image/png",
@@ -53,9 +57,68 @@ function isAllowedAssetUrl(url: string): boolean {
   }
 }
 
+const CAMPAIGN_ID_IN_PATH =
+  /\/campaigns\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\//i;
+
+function extractCampaignIdFromAssetUrl(url: string): string | null {
+  try {
+    return url.match(CAMPAIGN_ID_IN_PATH)?.[1] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+async function assertUserOwnsCampaignAsset(
+  userId: string,
+  assetUrl: string,
+): Promise<void> {
+  const campaignId = extractCampaignIdFromAssetUrl(assetUrl);
+  if (!campaignId) {
+    throw HttpError.badRequest("Invalid asset URL");
+  }
+
+  const supabase = createServerClient();
+  const { data: campaign, error: campaignError } = await supabase
+    .from("campaigns")
+    .select("id")
+    .eq("id", campaignId)
+    .eq("user_id", userId)
+    .maybeSingle();
+
+  if (campaignError || !campaign) {
+    throw HttpError.forbidden("You do not have access to this asset");
+  }
+
+  const { data: creative, error: creativeError } = await supabase
+    .from("creatives")
+    .select("id")
+    .eq("campaign_id", campaignId)
+    .eq("final_url", assetUrl)
+    .maybeSingle();
+
+  if (creativeError || !creative) {
+    throw HttpError.notFound("Asset not found");
+  }
+}
+
+async function userNeedsWatermark(userId: string): Promise<boolean> {
+  const supabase = createServerClient();
+  const { data: profile, error } = await supabase
+    .from("profiles")
+    .select("plan")
+    .eq("id", userId)
+    .maybeSingle();
+
+  if (error) {
+    throw HttpError.internal("Could not verify plan");
+  }
+
+  return !isPaidPlan(profile?.plan);
+}
+
 /**
  * Proxies a campaign asset download so the browser can save files without R2
- * CORS. Only URLs under our public R2 bucket are allowed.
+ * CORS. Requires auth; free-tier exports include a Posterly watermark.
  */
 export async function downloadCampaignAsset(
   req: Request,
@@ -63,6 +126,11 @@ export async function downloadCampaignAsset(
   next: NextFunction,
 ): Promise<void> {
   try {
+    const user = await getUserFromRequest(req);
+    if (!user) {
+      throw HttpError.unauthorized("Sign in to download posters");
+    }
+
     const url = typeof req.query.url === "string" ? req.query.url : "";
     const filename =
       typeof req.query.filename === "string" ? req.query.filename : "poster.png";
@@ -71,20 +139,26 @@ export async function downloadCampaignAsset(
       throw HttpError.badRequest("Invalid asset URL");
     }
 
+    await assertUserOwnsCampaignAsset(user.id, url);
+
     const assetRes = await fetch(url);
     if (!assetRes.ok) {
       throw HttpError.notFound("Asset not found");
     }
 
-    const buffer = Buffer.from(await assetRes.arrayBuffer());
+    let output = Buffer.from(await assetRes.arrayBuffer());
     const contentType = assetRes.headers.get("content-type") ?? "image/png";
+
+    if (await userNeedsWatermark(user.id)) {
+      output = Buffer.from(await applyWatermark(output));
+    }
 
     res.setHeader("Content-Type", contentType);
     res.setHeader(
       "Content-Disposition",
       `attachment; filename="${filename.replace(/"/g, "")}"`,
     );
-    res.send(buffer);
+    res.send(output);
   } catch (err) {
     next(err);
   }

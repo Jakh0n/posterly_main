@@ -103,3 +103,6 @@ export const PLAN_LABEL: Record<UserPlan, string> = {
   pro: "Pro",
   studio: "Studio",
 };
+
+/** Shown on free-tier exports and previews. */
+export const WATERMARK_LABEL = "Posterly";
